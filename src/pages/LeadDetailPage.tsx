@@ -14,10 +14,13 @@ import {
   listarTagsExistentes,
 } from '@/services/leadsService'
 import { carregarScoringConfig } from '@/services/scoreConfigService'
+import { listarAtividadesDoLead } from '@/services/activitiesService'
+import type { Activity } from '@/lib/types'
 import { LeadForm } from '@/components/LeadForm'
 import { ProposalRecommendation } from '@/components/ProposalRecommendation'
 import { ScoreBadge } from '@/components/ScoreBadge'
 import { TagInput } from '@/components/TagInput'
+import { ActivityTimeline } from '@/components/ActivityTimeline'
 
 export function LeadDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -26,18 +29,30 @@ export function LeadDetailPage() {
   const [lead, setLead] = useState<Lead | null>(null)
   const [config, setConfig] = useState<ScoringConfig | null>(null)
   const [tagsExistentes, setTagsExistentes] = useState<string[]>([])
+  const [atividades, setAtividades] = useState<Activity[]>([])
   const [carregando, setCarregando] = useState(true)
   const [editando, setEditando] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
+  // Recarrega a timeline de atividades (após mudanças que geram log).
+  async function recarregarAtividades(leadId: string) {
+    setAtividades(await listarAtividadesDoLead(leadId))
+  }
+
   useEffect(() => {
     if (!id) return
-    Promise.all([obterLead(id), carregarScoringConfig(), listarTagsExistentes()])
-      .then(([l, cfg, tags]) => {
+    Promise.all([
+      obterLead(id),
+      carregarScoringConfig(),
+      listarTagsExistentes(),
+      listarAtividadesDoLead(id),
+    ])
+      .then(([l, cfg, tags, ativ]) => {
         setLead(l)
         setConfig(cfg)
         setTagsExistentes(tags)
+        setAtividades(ativ)
       })
       .catch((e) => setErro(e.message))
       .finally(() => setCarregando(false))
@@ -62,6 +77,7 @@ export function LeadDetailPage() {
       const atualizado = await atualizarLead(id, input)
       setLead(atualizado)
       setEditando(false)
+      await recarregarAtividades(id) // edição pode mudar faixa/status → loga
     } catch (e) {
       setErro((e as Error).message)
     } finally {
@@ -85,6 +101,7 @@ export function LeadDetailPage() {
     try {
       await definirArquivado(id, novo)
       setLead({ ...lead, arquivado: novo })
+      await recarregarAtividades(id)
     } catch (e) {
       setErro((e as Error).message)
     }
@@ -172,6 +189,15 @@ export function LeadDetailPage() {
           ) : (
             <ResumoCriterios lead={lead} />
           )}
+        </div>
+
+        {/* Histórico de atividades deste lead */}
+        <div className="rounded-lg bg-white p-5 ring-1 ring-slate-200">
+          <h2 className="mb-4 text-sm font-semibold text-inter">Histórico de atividades</h2>
+          <ActivityTimeline
+            atividades={atividades}
+            vazioMsg="Sem atividades ainda. Mova de etapa ou edite para registrar."
+          />
         </div>
       </main>
     </div>

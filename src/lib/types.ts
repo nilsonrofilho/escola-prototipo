@@ -98,6 +98,23 @@ export type LeadInput = Omit<
 }
 
 // ----------------------------------------------------------------------------
+// Histórico de atividades
+// ----------------------------------------------------------------------------
+export type TipoAtividade = 'criado' | 'status' | 'arquivado' | 'desarquivado' | 'faixa'
+
+export interface Activity {
+  id: string
+  user_id: string
+  lead_id: string | null
+  lead_nome: string | null
+  tipo: TipoAtividade
+  descricao: string
+  de_valor: string | null
+  para_valor: string | null
+  created_at: string
+}
+
+// ----------------------------------------------------------------------------
 // Configuração de scoring
 // ----------------------------------------------------------------------------
 export interface ScoreConfigRow {

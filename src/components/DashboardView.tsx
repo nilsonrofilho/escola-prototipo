@@ -6,9 +6,11 @@
 //   - Funil por etapa (barras horizontais proporcionais)
 //   - Top tags
 // ============================================================================
-import { useMemo } from 'react'
-import type { Lead, Faixa, StatusFunil } from '@/lib/types'
+import { useEffect, useMemo, useState } from 'react'
+import type { Lead, Faixa, StatusFunil, Activity } from '@/lib/types'
 import { FAIXA_LABELS, FUNIL_ORDEM, STATUS_LABELS, corDaTag } from '@/lib/types'
+import { listarAtividades } from '@/services/activitiesService'
+import { ActivityTimeline } from '@/components/ActivityTimeline'
 
 interface Props {
   leads: Lead[]
@@ -121,6 +123,12 @@ export function DashboardView({ leads }: Props) {
 
   const maxStatus = Math.max(1, ...FUNIL_ORDEM.map((s) => stats.porStatus[s]))
 
+  // Feed geral de atividades recentes (recarrega quando os leads mudam).
+  const [atividades, setAtividades] = useState<Activity[]>([])
+  useEffect(() => {
+    listarAtividades(15).then(setAtividades).catch(() => setAtividades([]))
+  }, [leads])
+
   return (
     <div className="space-y-5">
       {/* Cards de resumo */}
@@ -188,6 +196,16 @@ export function DashboardView({ leads }: Props) {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Feed geral de atividades recentes */}
+      <div className="rounded-xl bg-white p-5 ring-1 ring-slate-200">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">Atividades recentes</h3>
+        <ActivityTimeline
+          atividades={atividades}
+          mostrarLead
+          vazioMsg="Nenhuma atividade ainda. Crie ou mova leads para ver o histórico aqui."
+        />
       </div>
     </div>
   )

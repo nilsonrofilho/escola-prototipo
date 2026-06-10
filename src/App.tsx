@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { LeadDetailPage } from '@/pages/LeadDetailPage'
+import { ChatWidget } from '@/components/ChatWidget'
 
 // Decide o que renderizar com base na sessão.
 function Rotas() {
@@ -31,11 +32,15 @@ function Rotas() {
 
   // Autenticado.
   return (
-    <Routes>
-      <Route path="/" element={<DashboardPage />} />
-      <Route path="/lead/:id" element={<LeadDetailPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/lead/:id" element={<LeadDetailPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      {/* Assistente de IA disponível em todas as telas autenticadas */}
+      <ChatWidget />
+    </>
   )
 }
 
