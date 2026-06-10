@@ -8,9 +8,11 @@
 // A IA pode responder em texto E/OU pedir um gráfico via "function calling"
 // (ferramenta gerar_grafico). O front então renderiza o gráfico.
 //
-// Runtime: Node.js (Fluid Compute na Vercel). Sem dependências pesadas —
-// chamamos a API REST da OpenAI direto com fetch.
+// IMPORTANTE: em projeto Vite (não-Next), as funções em api/ usam a assinatura
+// Node do @vercel/node — (req: VercelRequest, res: VercelResponse) — e respondem
+// com res.status().json(). Retornar um objeto Response NÃO funciona aqui.
 // ============================================================================
+import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 // Tipo do corpo esperado
 interface ChatBody {
@@ -76,97 +78,12 @@ function montarSystem(leadsResumo: unknown[], stats: unknown): string {
   ].join('\n')
 }
 
-export default async function handler(req: Request): Promise<Response> {
-  // Só aceita POST
-  if (req.method !== 'POST') {
-    return json({ error: 'Método não permitido' }, 405)
-  }
-
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    return json(
-      { error: 'OPENAI_API_KEY não configurada no servidor. Cadastre na Vercel (Environment Variables).' },
-      500,
-    )
-  }
-
-  let body: ChatBody
-  try {
-    body = (await req.json()) as ChatBody
-  } catch {
-    return json({ error: 'Corpo inválido (esperado JSON).' }, 400)
-  }
-
-  const { messages = [], leadsResumo = [], stats = {} } = body
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return json({ error: 'Envie ao menos uma mensagem.' }, 400)
-  }
-
-  // Limita o histórico para controlar custo/contexto.
-  const ultimas = messages.slice(-12)
-
-  const payload = {
-    model: 'gpt-4o-mini', // bom custo-benefício; troque para gpt-4o se quiser mais qualidade
-    messages: [
-      { role: 'system', content: montarSystem(leadsResumo, stats) },
-      ...ultimas,
-    ],
-    tools: TOOLS,
-    tool_choice: 'auto',
-    temperature: 0.3,
-    max_tokens: 800,
-  }
-
-  let resp: globalThis.Response
-  try {
-    resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    })
-  } catch (e) {
-    return json({ error: 'Falha ao contatar a OpenAI: ' + (e as Error).message }, 502)
-  }
-
-  if (!resp.ok) {
-    const txt = await resp.text()
-    return json({ error: 'Erro da OpenAI: ' + txt.slice(0, 500) }, resp.status)
-  }
-
-  const data = (await resp.json()) as OpenAIResponse
-  const choice = data.choices?.[0]?.message
-
-  // Extrai texto e, se houver, o gráfico pedido via tool call.
-  const texto = choice?.content ?? ''
-  let grafico: GraficoSpec | null = null
-
-  const toolCall = choice?.tool_calls?.find((t) => t.function?.name === 'gerar_grafico')
-  if (toolCall) {
-    try {
-      grafico = JSON.parse(toolCall.function.arguments) as GraficoSpec
-    } catch {
-      grafico = null
-    }
-  }
-
-  // Se a IA só chamou a ferramenta sem texto, gera um texto curto padrão.
-  const respostaTexto = texto || (grafico ? `Aqui está o gráfico: ${grafico.titulo}` : '...')
-
-  return json({ texto: respostaTexto, grafico })
-}
-
-// ---------------------------------------------------------------------------
-// Tipos auxiliares
-// ---------------------------------------------------------------------------
+// Tipos auxiliares da resposta da OpenAI
 interface GraficoSpec {
   tipo: 'barras' | 'pizza' | 'linha'
   titulo: string
   dados: { rotulo: string; valor: number }[]
 }
-
 interface OpenAIResponse {
   choices?: {
     message?: {
@@ -176,9 +93,82 @@ interface OpenAIResponse {
   }[]
 }
 
-function json(obj: unknown, status = 200): Response {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Só aceita POST
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Método não permitido' })
+    return
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    res.status(500).json({
+      error: 'OPENAI_API_KEY não configurada no servidor. Cadastre na Vercel (Environment Variables).',
+    })
+    return
+  }
+
+  // O Vercel já faz o parse do JSON em req.body (mas aceitamos string também).
+  let body: ChatBody
+  try {
+    body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body as ChatBody)
+  } catch {
+    res.status(400).json({ error: 'Corpo inválido (esperado JSON).' })
+    return
+  }
+
+  const { messages = [], leadsResumo = [], stats = {} } = body ?? {}
+  if (!Array.isArray(messages) || messages.length === 0) {
+    res.status(400).json({ error: 'Envie ao menos uma mensagem.' })
+    return
+  }
+
+  // Limita o histórico para controlar custo/contexto.
+  const ultimas = messages.slice(-12)
+
+  const payload = {
+    model: 'gpt-4o-mini', // bom custo-benefício; troque para gpt-4o se quiser mais qualidade
+    messages: [{ role: 'system', content: montarSystem(leadsResumo, stats) }, ...ultimas],
+    tools: TOOLS,
+    tool_choice: 'auto',
+    temperature: 0.3,
+    max_tokens: 800,
+  }
+
+  try {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!resp.ok) {
+      const txt = await resp.text()
+      res.status(resp.status).json({ error: 'Erro da OpenAI: ' + txt.slice(0, 500) })
+      return
+    }
+
+    const data = (await resp.json()) as OpenAIResponse
+    const choice = data.choices?.[0]?.message
+
+    const texto = choice?.content ?? ''
+    let grafico: GraficoSpec | null = null
+
+    const toolCall = choice?.tool_calls?.find((t) => t.function?.name === 'gerar_grafico')
+    if (toolCall) {
+      try {
+        grafico = JSON.parse(toolCall.function.arguments) as GraficoSpec
+      } catch {
+        grafico = null
+      }
+    }
+
+    const respostaTexto = texto || (grafico ? `Aqui está o gráfico: ${grafico.titulo}` : '...')
+    res.status(200).json({ texto: respostaTexto, grafico })
+  } catch (e) {
+    res.status(502).json({ error: 'Falha ao contatar a OpenAI: ' + (e as Error).message })
+  }
 }
