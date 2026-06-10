@@ -14,6 +14,18 @@ export interface FiltrosLead {
   status?: StatusFunil | 'todos'
   busca?: string // por nome da instituição / cidade
   tags?: string[] // filtra leads que contenham TODAS estas tags
+  incluirArquivados?: boolean // por padrão, oculta arquivados
+}
+
+// Normaliza um registro vindo do banco para o tipo Lead, garantindo defaults
+// de colunas que podem não existir ainda (tags, arquivado). Isso evita que a
+// UI quebre caso o SQL de migração ainda não tenha sido rodado.
+function normalizar(row: Record<string, unknown>): Lead {
+  return {
+    ...(row as unknown as Lead),
+    tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+    arquivado: typeof row.arquivado === 'boolean' ? row.arquivado : false,
+  }
 }
 
 // Lista os leads do usuário autenticado (RLS garante que só vêm os próprios).
@@ -37,7 +49,19 @@ export async function listarLeads(filtros: FiltrosLead = {}): Promise<Lead[]> {
 
   const { data, error } = await query
   if (error) throw error
-  return (data as Lead[]) ?? []
+  let leads = ((data as Record<string, unknown>[]) ?? []).map(normalizar)
+
+  // Filtro de arquivados aplicado no cliente (robusto mesmo se a coluna for nova).
+  if (!filtros.incluirArquivados) {
+    leads = leads.filter((l) => !l.arquivado)
+  }
+  return leads
+}
+
+// Arquiva / desarquiva um lead (ação reversível; não apaga nada).
+export async function definirArquivado(id: string, arquivado: boolean): Promise<void> {
+  const { error } = await supabase.from('leads').update({ arquivado }).eq('id', id)
+  if (error) throw error
 }
 
 // Atualiza apenas as tags de um lead (atalho usado na edição inline).
@@ -47,9 +71,10 @@ export async function atualizarTags(id: string, tags: string[]): Promise<void> {
 }
 
 // Retorna a lista de tags distintas já usadas pelo usuário (para autocompletar).
+// Resiliente: se a coluna `tags` ainda não existir, retorna lista vazia.
 export async function listarTagsExistentes(): Promise<string[]> {
   const { data, error } = await supabase.from('leads').select('tags')
-  if (error) throw error
+  if (error) return [] // coluna pode não existir ainda — degrada graciosamente
   const set = new Set<string>()
   for (const row of (data as { tags: string[] | null }[]) ?? []) {
     for (const t of row.tags ?? []) set.add(t)
@@ -61,7 +86,7 @@ export async function listarTagsExistentes(): Promise<string[]> {
 export async function obterLead(id: string): Promise<Lead | null> {
   const { data, error } = await supabase.from('leads').select('*').eq('id', id).maybeSingle()
   if (error) throw error
-  return (data as Lead) ?? null
+  return data ? normalizar(data as Record<string, unknown>) : null
 }
 
 // Recalcula o score do input com base na config atual do banco.
@@ -78,7 +103,7 @@ export async function criarLead(input: LeadInput): Promise<Lead> {
   const comScore = await aplicarScore(input)
   const { data, error } = await supabase.from('leads').insert(comScore).select().single()
   if (error) throw error
-  return data as Lead
+  return normalizar(data as Record<string, unknown>)
 }
 
 // Atualiza um lead (recalcula score antes de gravar).
@@ -86,7 +111,7 @@ export async function atualizarLead(id: string, input: LeadInput): Promise<Lead>
   const comScore = await aplicarScore(input)
   const { data, error } = await supabase.from('leads').update(comScore).eq('id', id).select().single()
   if (error) throw error
-  return data as Lead
+  return normalizar(data as Record<string, unknown>)
 }
 
 // Atualiza apenas o status do funil (atalho usado no dashboard).

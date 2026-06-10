@@ -10,6 +10,7 @@ import {
   atualizarLead,
   excluirLead,
   atualizarTags,
+  definirArquivado,
   listarTagsExistentes,
 } from '@/services/leadsService'
 import { carregarScoringConfig } from '@/services/scoreConfigService'
@@ -78,11 +79,23 @@ export function LeadDetailPage() {
     }
   }
 
+  async function handleArquivar() {
+    if (!id || !lead) return
+    const novo = !lead.arquivado
+    try {
+      await definirArquivado(id, novo)
+      setLead({ ...lead, arquivado: novo })
+    } catch (e) {
+      setErro((e as Error).message)
+    }
+  }
+
   if (carregando) return <p className="p-8 text-center text-slate-400">Carregando…</p>
   if (!lead) return <p className="p-8 text-center text-slate-400">Lead não encontrado.</p>
 
-  // Converte o Lead em LeadInput para preencher o formulário de edição.
-  const inicial: LeadInput = { ...lead }
+  // Converte o Lead em LeadInput para preencher o formulário de edição
+  // (LeadInput omite campos derivados como id/score/arquivado — cast seguro).
+  const inicial = lead as unknown as LeadInput
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -91,9 +104,14 @@ export function LeadDetailPage() {
           <button onClick={() => navigate('/')} className="text-sm text-inter hover:underline">
             ← Voltar
           </button>
-          <button onClick={handleExcluir} className="text-sm text-red-600 hover:underline">
-            Excluir
-          </button>
+          <div className="flex items-center gap-4">
+            <button onClick={handleArquivar} className="text-sm text-slate-500 hover:text-slate-800">
+              {lead.arquivado ? 'Desarquivar' : 'Arquivar'}
+            </button>
+            <button onClick={handleExcluir} className="text-sm text-red-600 hover:underline">
+              Excluir
+            </button>
+          </div>
         </div>
       </header>
 

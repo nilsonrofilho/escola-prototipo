@@ -74,15 +74,25 @@ export interface Lead {
   // Tags livres (array de texto). Ex.: ['follow-up', 'indicação'].
   tags: string[]
 
+  // Arquivado: some das visões por padrão (reversível, diferente de 'perdido').
+  arquivado: boolean
+
   created_at: string
   updated_at: string
 }
 
-// Campos editáveis no formulário (sem id/score/timestamps, que são derivados).
+// Campos editáveis no formulário (sem id/score/timestamps/arquivado, que são derivados/ações).
 // user_id é preenchido pelo banco (default auth.uid()).
 export type LeadInput = Omit<
   Lead,
-  'id' | 'user_id' | 'score' | 'faixa' | 'modelo_recomendado' | 'created_at' | 'updated_at'
+  | 'id'
+  | 'user_id'
+  | 'score'
+  | 'faixa'
+  | 'modelo_recomendado'
+  | 'arquivado'
+  | 'created_at'
+  | 'updated_at'
 > & {
   status_funil: StatusFunil
 }

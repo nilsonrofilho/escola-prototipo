@@ -9,6 +9,7 @@ export interface FiltrosUI {
   status: StatusFunil | 'todos'
   busca: string
   tags: string[] // tags selecionadas para filtrar
+  incluirArquivados: boolean // mostrar também leads arquivados
 }
 
 interface Props {
@@ -115,6 +116,17 @@ export function FilterBar({ filtros, onChange, tagsDisponiveis = [], mostrarStat
           )}
         </div>
       )}
+
+      {/* Toggle: mostrar arquivados */}
+      <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-slate-500">
+        <input
+          type="checkbox"
+          checked={filtros.incluirArquivados}
+          onChange={(e) => onChange({ ...filtros, incluirArquivados: e.target.checked })}
+          className="h-3.5 w-3.5 rounded border-slate-300 text-inter focus:ring-inter"
+        />
+        Mostrar arquivados
+      </label>
     </div>
   )
 }

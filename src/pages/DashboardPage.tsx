@@ -4,9 +4,8 @@
 //   • Kanban    — quadro estilo CRM, arrastável, colunas = etapas do funil
 //   • Lista     — tabela com filtros finos
 //
-// Os leads são carregados uma vez (com filtros de faixa/busca/tags aplicados no
-// servidor). O filtro de STATUS é aplicado no cliente, para o Kanban enxergar
-// todas as colunas mesmo com filtros ativos.
+// Novo lead abre em MODAL (pop-up). Filtro de status no cliente (Kanban vê tudo).
+// Arquivar oculta o lead por padrão; toggle "Mostrar arquivados" reexibe.
 // ============================================================================
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -16,6 +15,7 @@ import {
   listarLeads,
   criarLead,
   atualizarStatus,
+  definirArquivado,
   listarTagsExistentes,
   type FiltrosLead,
 } from '@/services/leadsService'
@@ -26,6 +26,7 @@ import { FilterBar, type FiltrosUI } from '@/components/FilterBar'
 import { ScoreConfigPanel } from '@/components/ScoreConfigPanel'
 import { KanbanBoard } from '@/components/KanbanBoard'
 import { DashboardView } from '@/components/DashboardView'
+import { Modal } from '@/components/Modal'
 
 type Aba = 'dashboard' | 'kanban' | 'lista'
 
@@ -51,8 +52,9 @@ export function DashboardPage() {
     status: 'todos',
     busca: '',
     tags: [],
+    incluirArquivados: false,
   })
-  const [mostrarForm, setMostrarForm] = useState(false)
+  const [modalNovo, setModalNovo] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [mostrarConfig, setMostrarConfig] = useState(false)
 
@@ -61,12 +63,17 @@ export function DashboardPage() {
     carregarScoringConfig().then(setConfig).catch((e) => setErro(e.message))
   }, [])
 
-  // Carrega leads (faixa/busca/tags no servidor; status fica no cliente).
+  // Carrega leads (faixa/busca/tags/arquivados no servidor; status fica no cliente).
   const recarregar = useCallback(async () => {
     setCarregando(true)
     setErro(null)
     try {
-      const f: FiltrosLead = { faixa: filtros.faixa, busca: filtros.busca, tags: filtros.tags }
+      const f: FiltrosLead = {
+        faixa: filtros.faixa,
+        busca: filtros.busca,
+        tags: filtros.tags,
+        incluirArquivados: filtros.incluirArquivados,
+      }
       const [data, tags] = await Promise.all([listarLeads(f), listarTagsExistentes()])
       setLeads(data)
       setTagsExistentes(tags)
@@ -75,18 +82,16 @@ export function DashboardPage() {
     } finally {
       setCarregando(false)
     }
-  }, [filtros.faixa, filtros.busca, filtros.tags])
+  }, [filtros.faixa, filtros.busca, filtros.tags, filtros.incluirArquivados])
 
   useEffect(() => {
     recarregar()
   }, [recarregar])
 
-  // Aplica o filtro de status no cliente (usado só na aba Lista).
+  // Filtro de status no cliente (usado só na aba Lista).
   const leadsLista = useMemo(
     () =>
-      filtros.status === 'todos'
-        ? leads
-        : leads.filter((l) => l.status_funil === filtros.status),
+      filtros.status === 'todos' ? leads : leads.filter((l) => l.status_funil === filtros.status),
     [leads, filtros.status],
   )
 
@@ -94,7 +99,7 @@ export function DashboardPage() {
     setSalvando(true)
     try {
       await criarLead(input)
-      setMostrarForm(false)
+      setModalNovo(false)
       await recarregar()
     } catch (e) {
       setErro((e as Error).message)
@@ -107,6 +112,21 @@ export function DashboardPage() {
     setLeads((ls) => ls.map((l) => (l.id === id ? { ...l, status_funil: status } : l))) // otimista
     try {
       await atualizarStatus(id, status)
+    } catch (e) {
+      setErro((e as Error).message)
+      await recarregar()
+    }
+  }
+
+  async function handleArquivar(id: string, arquivado: boolean) {
+    try {
+      await definirArquivado(id, arquivado)
+      // Se não estamos mostrando arquivados, o lead some da lista após arquivar.
+      if (!filtros.incluirArquivados && arquivado) {
+        setLeads((ls) => ls.filter((l) => l.id !== id))
+      } else {
+        setLeads((ls) => ls.map((l) => (l.id === id ? { ...l, arquivado } : l)))
+      }
     } catch (e) {
       setErro((e as Error).message)
       await recarregar()
@@ -131,6 +151,12 @@ export function DashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden text-xs text-slate-400 sm:inline">{user?.email}</span>
+            <button
+              onClick={() => setModalNovo(true)}
+              className="rounded-md bg-inter px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            >
+              + Novo lead
+            </button>
             <button
               onClick={() => setMostrarConfig(true)}
               className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
@@ -165,54 +191,14 @@ export function DashboardPage() {
       </header>
 
       <main className="mx-auto max-w-6xl space-y-5 px-4 py-6">
-        {/* Barra de ação + filtros (oculta no Dashboard, que é visão gerencial) */}
+        {/* Filtros (ocultos no Dashboard, que é visão gerencial) */}
         {aba !== 'dashboard' && (
           <div className="space-y-4 rounded-lg bg-white p-4 ring-1 ring-slate-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-700">
-                {aba === 'kanban' ? 'Quadro de leads' : 'Lista de leads'}
-              </h2>
-              <button
-                onClick={() => setMostrarForm((v) => !v)}
-                className="rounded-md bg-inter px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-              >
-                {mostrarForm ? 'Fechar' : '+ Novo lead'}
-              </button>
-            </div>
             <FilterBar
               filtros={filtros}
               onChange={setFiltros}
               tagsDisponiveis={tagsExistentes}
               mostrarStatus={aba === 'lista'}
-            />
-          </div>
-        )}
-
-        {/* Botão de novo lead também no Dashboard */}
-        {aba === 'dashboard' && (
-          <div className="flex justify-end">
-            <button
-              onClick={() => {
-                setAba('lista')
-                setMostrarForm(true)
-              }}
-              className="rounded-md bg-inter px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-            >
-              + Novo lead
-            </button>
-          </div>
-        )}
-
-        {/* Formulário inline de novo lead */}
-        {mostrarForm && config && aba !== 'dashboard' && (
-          <div className="rounded-lg bg-white p-5 ring-1 ring-slate-200">
-            <h3 className="mb-4 text-sm font-semibold text-inter">Novo lead</h3>
-            <LeadForm
-              config={config}
-              onSubmit={handleCriar}
-              onCancel={() => setMostrarForm(false)}
-              salvando={salvando}
-              sugestoesTags={tagsExistentes}
             />
           </div>
         )}
@@ -228,14 +214,37 @@ export function DashboardPage() {
           <>
             {aba === 'dashboard' && <DashboardView leads={leads} />}
             {aba === 'kanban' && (
-              <KanbanBoard leads={leads} onAbrir={abrir} onMudarStatus={handleStatus} />
+              <KanbanBoard
+                leads={leads}
+                onAbrir={abrir}
+                onMudarStatus={handleStatus}
+                onArquivar={handleArquivar}
+              />
             )}
             {aba === 'lista' && (
-              <LeadList leads={leadsLista} onAbrir={abrir} onMudarStatus={handleStatus} />
+              <LeadList
+                leads={leadsLista}
+                onAbrir={abrir}
+                onMudarStatus={handleStatus}
+                onArquivar={handleArquivar}
+              />
             )}
           </>
         )}
       </main>
+
+      {/* Modal de novo lead */}
+      <Modal aberto={modalNovo} onClose={() => setModalNovo(false)} titulo="Novo lead">
+        {config && (
+          <LeadForm
+            config={config}
+            onSubmit={handleCriar}
+            onCancel={() => setModalNovo(false)}
+            salvando={salvando}
+            sugestoesTags={tagsExistentes}
+          />
+        )}
+      </Modal>
 
       {mostrarConfig && (
         <ScoreConfigPanel onFechar={() => setMostrarConfig(false)} onRecalculado={recarregar} />
